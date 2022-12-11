@@ -1,0 +1,154 @@
+install.packages("rootSolve")
+library("rootSolve")
+install.packages("maxLik")
+library("maxLik")
+
+dane = read.csv(file = "data.csv", header = TRUE, sep = ",")
+y = dane$so2
+x = na.omit(y)
+k = x[42571:44823]
+N=length(k)
+
+# rozklad Gamma
+
+# Metoda Najwiekszej Wiarygodnosci 
+lnL = function(parametry){
+  alpha = parametry[1]
+  beta = parametry[2]
+  ll=(alpha-1)*sum(log(k))-sum(k/beta)-N*alpha*log(beta)-
+    N*log(gamma(alpha))
+  return(ll)
+}
+gradient=function(parametry){
+  alpha=parametry[1]
+  beta=parametry[2]
+  gr=rep(0, times=length(parametry))
+  gr[1]=sum(log(k))-N*log(beta)-N*digamma(alpha)
+  gr[2]=(1/beta^2)*sum(k)-N*alpha*(1/beta)
+  return(gr)
+}
+hessjan =function(parametry){
+  alpha=parametry[1]
+  beta=parametry[2]
+  h=matrix(0, nrow=2, ncol=2)
+  h[1,1]=-N*trigamma(alpha)
+  h[2,2]=N*alpha*(1/beta^2)-(2/beta^3)*sum(k)
+  h[1,2]=-N/beta
+  h[2,1]=h[1,2]
+  return(h)
+}
+wynik=maxNR(fn=lnL, grad=gradient, hess=hessjan, start=c(2,2))
+summary(wynik)
+
+# Metoda momentow
+uklad.rownan = function(k){
+  alpha = k[1]
+  beta = k[2]
+  r1 = mean(k)-alpha/beta
+  r2 = var(k)-alpha/beta^2
+  return(c(r1,r2))
+}
+wynik = multiroot(f=uklad.rownan, start=c(1,1))
+wynik$root
+
+# test Kolmogorowa-Smirnowa
+(ks.test(x = k, "pgamma", wynik$root[1], wynik$root[2], exact = NULL))
+# Wniosek: p-value=0, wiec odrzucam H0 o zgodnosci
+
+# rozklad Lognormalny
+
+# Metoda Najwiekszej Wiarygodnosci 
+
+lnL=function(parametry){
+  mu=parametry[1]
+  sigma=parametry[2]
+  val=-N/2*log(2*pi)-N*log(sigma)-sum(log(k))-
+    1/(2*sigma^2)*sum((log(k)-mu)^2)
+}
+gradient=function(parametry){
+  mu=parametry[1]
+  sigma=parametry[2]
+  gr=rep(0, times=length(parametry))
+  gr[1]=sum(log(k)-mu)/sigma^2
+  gr[2]=-N/sigma+sum((log(k)-mu)^2)/sigma^3
+  return(gr)
+}
+hessjan =function(parametry){
+  mu=parametry[1]
+  sigma=parametry[2]
+  h=matrix(0, nrow=2, ncol=2)
+  h[1,1]=-N/sigma^2
+  h[2,2]=N/sigma^2-3*sum((log(k)-mu)^2)/sigma^4
+  h[1,2]=-2*sum(log(k)-mu)/sigma^3
+  h[2,1]=h[1,2]
+  return(h)
+}
+
+wynik=maxNR(fn=lnL, grad=gradient, hess=hessjan, start=c(1,1))
+summary(wynik)
+
+# Metoda Momentow
+
+uklad.rownan = function(k){
+  mu = k[1]
+  sigma = k[2]
+  r1 = mean(k)-exp((mu+sigma^2)/2)
+  r2 = var(k)-(exp(sigma^2)-1)*exp(2*mu+sigma^2)
+  return(c(r1,r2))
+}
+wynik = multiroot(f=uklad.rownan, start=c(1,1))
+wynik$root
+
+# test Kolmogorowa-Smirnowa
+(ks.test(x = k, "pnorm", wynik$estimate[1], wynik$estimate[2], exact = NULL))
+
+# Testowanie hipotez - rozklad Gamma
+
+# H0: alpha=0.15 oraz beta=87.38
+lnL_U = wynik$maximum
+lnL_R = lnL(c(0.15,87.38))
+LR.test = 2*(lnL_U-lnL_R)
+print(LR.test)
+alfa=0.05
+g=2
+qchisq(1-alfa, df=g)
+(p.value = 1-pchisq(LR.test, df=g))
+# LR.test = 10865.22 wpada do obszaru krytycznego K = (5.99, +nieskonczonosc)
+# p.value = 0 < alfa
+# WNIOSEK: odrzucam hipoteze zerowa
+
+#H0: beta = 1
+vcov = -solve(wynik$hessian)
+std.err.beta = sqrt(vcov[2,2])
+z.test = (wynik$estimate[2]-1)/std.err.beta
+print(z.test)
+(p.value = 2*(1-pnorm(abs(z.test))))
+
+# z.test wpada do obszaru krytycznego K=(-niesk, -1.96)suma(1.96, +niesk)
+# p.value = 0.77 > alfa
+# WNIOSEK: odrzucam hipoteze zerowa
+
+# Testowanie hipotez
+# Testowanie hipotez - rozklad Lognormalny
+# H0: mu = 2
+vcov = -solve(wynik$hessian)
+std.err.mu = sqrt(vcov[2,2])
+z.test = (wynik$estimate[1]-2)/std.err.mu
+print(z.test)
+(p.value = 2*(1-pnorm(abs(z.test))))
+# statystyka z.test wpada do obszaru krytycznego K=(-niesk, -1.96)suma(1.96, +niesk)
+# p.value = 0 < alfa
+# WNIOSEK: odrzucam hipoteze zerowa
+
+# H0: mu = 1.78 oraz sigma = 0.46
+lnL_U = wynik$maximum
+lnL_R = lnL(c(1.78,1.46))
+LR.test = 2*(lnL_U-lnL_R)
+print(LR.test)
+alfa=0.05
+g=2
+qchisq(1-alfa, df=g)
+(p.value = 1-pchisq(LR.test, df=g))
+# LR.test = 6403.754 wpada do obszaru krytycznego K = (5.99, +nieskonczonosc)
+#p-value < alfa
+# WNIOSEK: odrzucam hipoteze zerowa
